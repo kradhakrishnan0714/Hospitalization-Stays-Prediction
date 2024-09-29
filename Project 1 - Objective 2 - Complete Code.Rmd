@@ -1,0 +1,925 @@
+---
+title: "DS-6372: Project 1 - Objective 2"
+author: "Robert Hines"
+date: "2024-09-29"
+output: html_document
+---
+
+```{r message=FALSE}
+library(dplyr)         # A Grammar of Data Manipulation and Transformation
+library(car)           # Provides tools for regression modeling, including the 'vif' function
+library(caret)         # Used for machine learning
+library(glmnet)        # For LASSO and Ridge feature selection
+library(randomForest)  # For Random Forest implementation
+
+library(ggplot2)       # Elegant Data Visualizations Using the Grammar of Graphics
+library(ggcorrplot)    # For creating correlation plots
+library(GGally)        # For creating scatter plot matrices
+```
+
+```{r}
+file_path <- file.choose()
+HospitalDurations <- read.csv(file_path)
+```
+
+```{r}
+colnames(HospitalDurations) <- c("LengthOfStay",    # Lgth of Sty
+                                 "ID",              # ID
+                                 "Age",             # Age
+                                 "InfectionRisk",   # Inf Risk
+                                 "CulturesRatio",   # R Cul Rat
+                                 "XrayRatio",       # R CX-ray Rat
+                                 "NumBeds",         # N Beds
+                                 "MedSchoolAff",    # Med Sc Aff
+                                 "Region",          # Region
+                                 "AvgPatients",     # Avg Pat
+                                 "AvgNurses",       # Avg Nur
+                                 "PctServices")     # Pct Ser&Fac
+```
+
+# Begin Exploratory Data Analysis: View the structure of the dataset
+```{r}
+str(HospitalDurations)
+```
+
+```{r}
+summary(HospitalDurations)
+```
+
+# Calculating and visualizing the proporiton of missing values in each column of the data: No Missing Values
+```{r}
+missing_prop <- colMeans(is.na(HospitalDurations))
+missing_df <- data.frame(variable = names(HospitalDurations), prop_missing = missing_prop)
+missing_df <- missing_df %>% filter(prop_missing != 0)
+
+head(missing_df)
+```
+
+# Checking the data for any duplicated values: No Duplicate Values
+```{r}
+head(HospitalDurations[duplicated(HospitalDurations), ])
+```
+
+# Exclude the ID column because it provides no value for analysis
+```{r}
+HospitalDurations <- HospitalDurations %>%
+  dplyr::select(-ID)
+```
+
+# Correlation matrix for numeric columns
+```{r}
+cor_matrix <- cor(HospitalDurations, use = "complete.obs")
+cor_matrix
+```
+#   Plot correlation matrix 
+#   Correlations to consider:
+#   NumBeds{Avg.Pat:0.98, Avg.Nur:0.92, Med.Sc.Aff:-0.59, Pct.Ser.Fac:0.79}
+#   Avg.Pat{NumBeds:0.98, Avg.Nur:0.91, Med.Sc.Aff:-0.51, Pct.Ser.Fac:0.78}
+#   Avg.Nur{NumBeds:0.92, Avg.Pat:0.91, Med.Sc.Aff:-0.59, Pct.Ser.Fac:0.78}
+#   Pct.Ser.Fac{NumBeds:0.79, Avg.Pat:0.78, Avg.Nur:0.78, Med.Sc.Aff:-0.52}
+```{r}
+ggcorrplot(cor_matrix, method = "square",  type = "lower",
+  lab = TRUE,
+  lab_size = 2.5,
+  colors = c("#0073C2FF", "white", "#EFC000FF"),
+  title = "Correlation Plot of Hospital Durations",
+  ggtheme = ggplot2::theme_minimal()
+) + 
+  theme(legend.position = "none")
+```
+
+# Fit a Full Model with all Explanatory Variables
+```{r}
+model <- lm(LengthOfStay ~ ., data = HospitalDurations)
+summary(model)
+```
+
+# Check Variance Inflation Factors (VIF) for the model
+```{r}
+vif_values <- vif(model)
+print(vif_values)
+```
+
+```{r}
+vif_df <- data.frame(variable = names(vif_values), VIF = vif_values)
+
+ggplot(vif_df, aes(x = reorder(variable, VIF), y = VIF)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  geom_hline(yintercept = 10, linetype = "dashed", color = "red") +
+  labs(title = "Variance Inflation Factor (VIF) for Each Variable",
+       x = "Variable", y = "VIF Value") +
+  theme_minimal()
+```
+
+# Number of Beds: VIF 34.37 <- This feature is not Statistically Significant. Drop it and retain Average Number of Patients which is highly significant.
+```{r}
+HospitalDurations <- HospitalDurations %>%
+  dplyr::select(-NumBeds)
+```
+
+```{r}
+model <- lm(LengthOfStay ~ ., data = HospitalDurations)
+summary(model)
+```
+
+# Check Variance Inflation Factors (VIF) for the model
+```{r}
+vif_values <- vif(model)
+print(vif_values)
+```
+
+```{r}
+vif_df <- data.frame(variable = names(vif_values), VIF = vif_values)
+
+ggplot(vif_df, aes(x = reorder(variable, VIF), y = VIF)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  geom_hline(yintercept = 10, linetype = "dashed", color = "red") +
+  labs(title = "Variance Inflation Factor (VIF) for Each Variable",
+       x = "Variable", y = "VIF Value") +
+  theme_minimal()
+```
+
+```{r}
+cor_matrix <- cor(HospitalDurations, use = "complete.obs")
+cor_matrix
+```
+
+```{r}
+ggcorrplot(cor_matrix, method = "square",  type = "lower",
+  lab = TRUE,
+  lab_size = 2.5,
+  colors = c("#0073C2FF", "white", "#EFC000FF"),
+  title = "Correlation Plot of Hospital Durations",
+  ggtheme = ggplot2::theme_minimal()
+) + 
+  theme(legend.position = "none")
+```
+
+# Create partial regression plots for the model
+```{r}
+avPlots(model, ask = FALSE) 
+```
+
+# Step 1: Prepare the Dataset
+```{r}
+HospitalDurations <- HospitalDurations %>%
+  dplyr::select(-AvgPatients, -AvgNurses) %>%
+  mutate(
+    Region = as.factor(Region),
+    MedSchoolAff = as.factor(MedSchoolAff)
+  )
+```
+
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(HospitalDurations$LengthOfStay, p = 0.8, list = FALSE)
+trainData <- HospitalDurations[trainIndex, ]
+testData <- HospitalDurations[-trainIndex, ]
+```
+
+# 2. LASSO and Ridge Regression
+```{r}
+x <- model.matrix(LengthOfStay ~ ., trainData)[, -1]
+y <- trainData$LengthOfStay
+```
+
+```{r}
+# Fit LASSO model
+lasso_model <- cv.glmnet(x, y, alpha = 1)  # alpha = 1 specifies LASSO
+best_lambda_lasso <- lasso_model$lambda.min
+
+# Extract coefficients for best lambda
+lasso_coefficients <- as.matrix(coef(lasso_model, s = best_lambda_lasso))
+lasso_coeff_df <- data.frame(Feature = rownames(lasso_coefficients), Coefficient = lasso_coefficients[, 1])
+
+# Filter features with non-zero coefficients
+lasso_coeff_df <- subset(lasso_coeff_df, Coefficient != 0)
+lasso_selected <- rownames(lasso_coefficients)[lasso_coefficients != 0]
+```
+
+```{r}
+ggplot(lasso_coeff_df, aes(x = reorder(Feature, Coefficient), y = Coefficient)) +
+  geom_bar(stat = "identity", fill = "darkorange") +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Non-Zero Feature Coefficients (LASSO Regression)", x = "Features", y = "Coefficient Value")
+```
+
+```{r}
+# Fit Ridge model
+ridge_model <- cv.glmnet(x, y, alpha = 0)  # alpha = 0 specifies Ridge regression
+best_lambda_ridge <- ridge_model$lambda.min
+
+# Extract coefficients for best lambda
+ridge_coefficients <- as.matrix(coef(ridge_model, s = best_lambda_ridge)) 
+ridge_coeff_df <- data.frame(Feature = rownames(ridge_coefficients), Coefficient = ridge_coefficients[, 1])
+
+# Filter features with non-zero coefficients
+ridge_coeff_df <- subset(ridge_coeff_df, Coefficient != 0)
+ridge_selected <- rownames(ridge_coefficients)[ridge_coefficients != 0]
+```
+
+```{r}
+ggplot(ridge_coeff_df, aes(x = reorder(Feature, Coefficient), y = Coefficient)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Non-Zero Feature Coefficients (Ridge Regression)", x = "Features", y = "Coefficient Value")
+```
+
+```{r}
+selected_features <- list(
+  LASSO = lasso_selected,
+  Ridge = ridge_selected
+)
+```
+
+# Display the selected features
+
+```{r}
+print("Selected Features by LASSO:")
+print(selected_features$LASSO)
+```
+
+```{r}
+print("Selected Features by Ridge:")
+print(selected_features$Ridge)
+```
+
+
+```{r}
+HospitalDurations <- read.csv(file_path)
+```
+
+```{r}
+colnames(HospitalDurations) <- c("ID",              # ID
+                                 "LengthOfStay",    # Lgth of Sty
+                                 "Age",             # Age
+                                 "InfectionRisk",   # Inf Risk
+                                 "CulturesRatio",   # R Cul Rat
+                                 "XrayRatio",       # R CX-ray Rat
+                                 "NumBeds",         # N Beds
+                                 "MedSchoolAff",    # Med Sc Aff
+                                 "Region",          # Region
+                                 "AvgPatients",     # Avg Pat
+                                 "AvgNurses",       # Avg Nur
+                                 "PctServices")     # Pct Ser&Fac
+```
+
+```{r}
+# Data Preparation
+HospitalDurations <- HospitalDurations %>%
+  dplyr::select(-ID) %>%
+  mutate(
+    Region = as.factor(Region),
+    MedSchoolAff = as.factor(MedSchoolAff)
+  )
+```
+
+```{r}
+# Define a grid for tuning the 'mtry' parameter
+tune_grid <- expand.grid(.mtry = c(2, 3, 4, 5, 6, 7, 8))
+
+# Define different cross-validation methods
+cv_methods <- list(
+  "5-Fold CV" = trainControl(method = "cv", number = 5),
+  "10-Fold CV" = trainControl(method = "cv", number = 10),
+  "LOOCV" = trainControl(method = "LOOCV"),
+  "Repeated 5-Fold (3x)" = trainControl(method = "repeatedcv", number = 5, repeats = 3),
+  "Bootstrap (25 Resamples)" = trainControl(method = "boot", number = 25)
+)
+```
+
+```{r}
+set.seed(123)
+
+# Initialize an empty list to store results and plots
+results <- list()
+models <- list()
+plots <- list()
+
+# Train Random Forest model using each cross-validation method
+for (cv_name in names(cv_methods)) {
+  cat("Training with", cv_name, "\n")
+  rf_model <- train(LengthOfStay ~ ., data = HospitalDurations,
+                    method = "rf",
+                    trControl = cv_methods[[cv_name]],
+                    importance = TRUE,
+                    ntree = 1000,
+                    metric = "RMSE")
+
+  # Extract metrics (RMSE, MAE, R-squared)
+  metrics <- data.frame(
+    Method = cv_name,
+    RMSE = min(rf_model$results$RMSE),                                     # Minimum RMSE
+    MAE = rf_model$results$MAE[which.min(rf_model$results$RMSE)],          # MAE corresponding to best RMSE
+    Rsquared = rf_model$results$Rsquared[which.min(rf_model$results$RMSE)] # R-squared for best RMSE
+  )
+  
+  # Store results
+  results[[cv_name]] <- metrics
+  models[[cv_name]] <- rf_model
+
+  # Store Actual vs Predicted plot
+  predictions <- predict(rf_model, HospitalDurations)
+  pred_df <- data.frame(Actual = HospitalDurations$LengthOfStay, Predicted = predictions)
+  
+  plot_actual_vs_predicted <- ggplot(pred_df, aes(x = Predicted, y = Actual)) +
+    geom_point(color = "blue", alpha = 0.5) +       
+    geom_abline(slope = 1, intercept = 0, color = "red", linetype = "solid") +
+    labs(title = paste("Actual vs Predicted for", cv_name),
+         x = "Predicted Length of Stay",
+         y = "Actual Length of Stay") +
+    theme_minimal()
+  
+  # Store the plot in the list
+  plots[[paste0(cv_name, "_Actual_vs_Predicted")]] <- plot_actual_vs_predicted
+
+  varImpPlot(rf_model$finalModel, main = paste("Variable Importance for", cv_name))
+  
+  # Capture the plot to store it
+  plots[[paste0(cv_name, "_Variable_Importance")]] <- recordPlot()
+}
+
+# Combine results
+cv_results <- do.call(rbind, results)
+print(cv_results)
+```
+
+```{r}
+# Identify the best model based on the lowest RMSE
+best_cv_method <- cv_results$Method[which.min(cv_results$RMSE)]
+best_model <- models[[best_cv_method]]
+
+cat("The best Random Forest model was trained using", best_cv_method, "with an RMSE of", min(cv_results$RMSE), "\n")
+print(best_model)
+```
+
+```{r}
+# RMSE
+ggplot(cv_results, aes(x = Method, y = RMSE, fill = Method)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(title = "Comparison of RMSE Across Cross-Validation Methods",
+       x = "Cross-Validation Method",
+       y = "Root Mean Squared Error (RMSE)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# MAE
+ggplot(cv_results, aes(x = Method, y = MAE, fill = Method)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(title = "Comparison of MAE Across Cross-Validation Methods",
+       x = "Cross-Validation Method",
+       y = "Mean Absolute Error (MAE)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# R-squared
+ggplot(cv_results, aes(x = Method, y = Rsquared, fill = Method)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(title = "Comparison of R-squared Across Cross-Validation Methods",
+       x = "Cross-Validation Method",
+       y = "R-squared") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+# Display all stored plots for each cross-validation method
+```{r}
+for (plot_name in names(plots)) {
+  cat("\nDisplaying plot:", plot_name, "\n")
+  if (inherits(plots[[plot_name]], "gg")) {
+    print(plots[[plot_name]])
+  } else {
+    replayPlot(plots[[plot_name]])
+  }
+}
+```
+
+# Residual Plotting and Testing Model Assumptions
+```{r}
+residuals <- HospitalDurations$LengthOfStay - as.numeric(models$`10-Fold CV`$finalModel$predicted)
+residual_data <- data.frame(Predicted = as.numeric(models$`10-Fold CV`$finalModel$predicted), Actual = HospitalDurations$LengthOfStay, Residuals = residuals)
+```
+
+```{r}
+ggplot(residual_data, aes(x = Predicted, y = Residuals)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs Predicted Values", x = "Predicted Values", y = "Residuals") +
+  theme_minimal()
+```
+
+```{r}
+ggplot(residual_data, aes(x = Residuals)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of Residuals", x = "Residuals", y = "Frequency") +
+  theme_minimal()
+```
+
+```{r}
+ggplot(residual_data, aes(sample = Residuals)) +
+  stat_qq() +  # Create the Q-Q plot
+  stat_qq_line(color = "red", linetype = "dashed") +
+  labs(title = "Q-Q Plot of Residuals", x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal()
+```
+
+```{r}
+ggplot(residual_data, aes(x = Predicted, y = sqrt(abs(Residuals)))) +
+  geom_point(alpha = 0.6) + 
+  geom_smooth(method = "loess", color = "red", se = FALSE) +
+  labs(title = "Scale-Location Plot", x = "Predicted Values", y = "√|Residuals|") +
+  theme_minimal()
+```
+
+#################################################################################################################################################################################################################################################################################################################################################################################################################################################################################                                                                                                                                                                          #########################
+#########################                                                            Part 2: Survival Analysis                                                                                     #########################
+#########################                                                                                                                                                                          #########################
+#########################                                                                                                                                                                          #########################
+########################################################################################################################################################################################################################################################################################################################################################################################################################################################
+
+```{r message=FALSE}
+library(dplyr)      # A Grammar of Data Manipulation and Transformation
+library(ggplot2)    # Elegant Data Visualizations Using the Grammar of Graphics
+library(ggcorrplot) # For creating correlation plots
+library(car)        # Provides tools for regression modeling, including the 'vif' function
+library(caret)      # For data preprocessing
+
+library(survival)   # Used for survival analysis
+library(survminer)  # For visualization of survival curves
+library(pec)        # Prediction error and concordance measures
+library(broom)      # For extracting model coefficients
+library(boot)       # For bootstrapping
+```
+
+```{r}
+file_path <- file.choose()
+HospitalDurations <- read.csv(file_path)
+```
+
+```{r}
+# Data Preparation
+HospitalDurations <- HospitalDurations %>%
+  dplyr::select(-ID) %>%
+  mutate(
+    Region = as.factor(Region),
+    Med.Sc.Aff = as.factor(Med.Sc.Aff)
+  )
+```
+
+```{r}
+# Rename columns using a more readable and efficient naming convention
+colnames(HospitalDurations) <- c("LengthOfStay",    # Lgth of Sty
+                                 "Age",             # Age
+                                 "InfectionRisk",   # Inf Risk
+                                 "CulturesRatio",   # R Cul Rat
+                                 "XrayRatio",       # R CX-ray Rat
+                                 "NumBeds",         # N Beds
+                                 "MedSchoolAff",    # Med Sc Aff
+                                 "Region",          # Region
+                                 "AvgPatients",     # Avg Pat
+                                 "AvgNurses",       # Avg Nur
+                                 "PctServices")     # Pct Ser&Fac
+```
+
+```{r}
+# Calculate Resource to Patient ratio by incorporating the available beds, average patients, and nursing staff
+HospitalDurations$ResourceToPatient <- ((HospitalDurations$NumBeds - HospitalDurations$AvgPatients) + HospitalDurations$AvgNurses) / HospitalDurations$AvgPatients
+# Why: This measure provides insight into the hospital's resource availability relative to patient load.
+
+# Adjust Infection Risk to a Decimal Scale for consistency
+HospitalDurations$InfectionRisk <- HospitalDurations$InfectionRisk / 100
+# Why: Converting InfectionRisk to a percentage scale ensures consistency with other risk metrics and allows other feauters to be derived.
+```
+
+```{r}
+# Calculate PneumoniaRate using the XrayRatio relative to CulturesRatio
+HospitalDurations$PneumoniaRate <- HospitalDurations$XrayRatio / (HospitalDurations$CulturesRatio + HospitalDurations$XrayRatio)
+# Why: This metric shows how the use of X-rays compares to culture testing for detecting pneumonia. Used for Calculating Pneumonia Rate.
+
+# Calculate the Adjusted Pneumonia Risk by combining infection risk with pneumonia rate
+HospitalDurations$PneumoniaRisk <- HospitalDurations$InfectionRisk * HospitalDurations$PneumoniaRate
+# Why: Provides an adjusted measure of pneumonia risk by considering both infection and diagnostic rates. Used for Estimated number of Patients Without Pneumonia.
+```
+
+```{r}
+# Calculate the estimated patients without infection using infection risk
+HospitalDurations$EstimatedPatientsWithoutInfection <- HospitalDurations$AvgPatients * (1 - HospitalDurations$InfectionRisk)
+# Why: Helps to quantify the number of patients potentially unaffected by infections. Used for Estimated number of Patients Without Pneumonia.
+```
+
+```{r}
+# Calculate residuals for patients without infection relative to average patients
+patients_lm <- lm(EstimatedPatientsWithoutInfection ~ AvgPatients, data = HospitalDurations)
+HospitalDurations$PatientsWithoutInfectionResiduals <- residuals(patients_lm)
+# Why: Helps identify differences in patient counts that are not explained by the average number of patients.
+```
+
+```{r}
+HospitalDurations <- HospitalDurations %>%
+  dplyr::select(LengthOfStay, Age, InfectionRisk, XrayRatio, MedSchoolAff, Region, AvgPatients, ResourceToPatient, PatientsWithoutInfectionResiduals)
+```
+
+```{r}
+model <- lm(LengthOfStay ~ Age + InfectionRisk + MedSchoolAff + XrayRatio + AvgPatients + Region*ResourceToPatient + PatientsWithoutInfectionResiduals, data = HospitalDurations)
+summary(model)
+anova_results <- anova(model)
+print(anova_results)
+```
+
+```{r}
+# Create a histogram for each numeric variable
+for (variable in colnames(HospitalDurations)) {
+  if (is.numeric(HospitalDurations[[variable]])) {
+    p <- ggplot(HospitalDurations, aes_string(x = variable)) +
+      geom_histogram(bins = 20, fill = "blue", color = "black", alpha = 0.7) +
+      theme_minimal() +
+      labs(title = paste("Distribution of", variable), x = variable, y = "Frequency") +
+      theme(plot.title = element_text(hjust = 0.5))
+    print(p)
+  } else {
+    # Create a bar plot for categorical variables
+    p <- ggplot(HospitalDurations, aes_string(x = variable)) +
+      geom_bar(fill = "orange", color = "black", alpha = 0.7) +
+      theme_minimal() +
+      labs(title = paste("Distribution of", variable), x = variable, y = "Count") +
+      theme(plot.title = element_text(hjust = 0.5))
+    print(p)
+  }
+}
+```
+
+# Create partial regression plots for the model
+```{r}
+avPlots(model, ask = FALSE)
+```
+
+```{r}
+# Log-transforming skewed variables
+HospitalDurations$AvgPatients <- log(HospitalDurations$AvgPatients)
+HospitalDurations$ResourceToPatient <- log(HospitalDurations$ResourceToPatient)
+```
+
+```{r}
+# Robust scaling function
+robust_scale <- function(x) {
+  (x - median(x, na.rm = TRUE)) / IQR(x, na.rm = TRUE)
+}
+
+# Apply robust scaling to numeric columns
+numeric_columns <- sapply(HospitalDurations, is.numeric)
+scaled_predictors <- as.data.frame(lapply(HospitalDurations[, numeric_columns & names(HospitalDurations) != "LengthOfStay"], robust_scale))
+
+# Combine the scaled predictors with non-numeric predictors
+non_numeric_predictors <- HospitalDurations[, !numeric_columns]
+final_scaled_data <- cbind(scaled_predictors, non_numeric_predictors, LengthOfStay = HospitalDurations$LengthOfStay)
+```
+
+```{r}
+# Create a histogram for each numeric variable
+for (variable in colnames(HospitalDurations)) {
+  if (is.numeric(HospitalDurations[[variable]])) {
+    p <- ggplot(HospitalDurations, aes_string(x = variable)) +
+      geom_histogram(bins = 20, fill = "blue", color = "black", alpha = 0.7) +
+      theme_minimal() +
+      labs(title = paste("Distribution of", variable), x = variable, y = "Frequency") +
+      theme(plot.title = element_text(hjust = 0.5))
+    print(p)
+  } else {
+    # Create a bar plot for categorical variables
+    p <- ggplot(HospitalDurations, aes_string(x = variable)) +
+      geom_bar(fill = "orange", color = "black", alpha = 0.7) +
+      theme_minimal() +
+      labs(title = paste("Distribution of", variable), x = variable, y = "Count") +
+      theme(plot.title = element_text(hjust = 0.5))
+    print(p)
+  }
+}
+```
+
+```{r}
+model <- lm(LengthOfStay ~ Age + InfectionRisk + MedSchoolAff + XrayRatio + AvgPatients + Region*ResourceToPatient + PatientsWithoutInfectionResiduals, data = HospitalDurations)
+avPlots(model, ask = FALSE)
+```
+
+
+```{r}
+# Fit Kaplan-Meier model
+km_fit <- survfit(Surv(LengthOfStay) ~ 1, data = HospitalDurations)
+
+# Plot the Kaplan-Meier curve
+ggsurvplot(km_fit, conf.int = TRUE)
+```
+
+```{r}
+# Fit the AFT model using the weibull distribution
+aft_weibull <- survreg(Surv(LengthOfStay) ~ Age + InfectionRisk + MedSchoolAff + XrayRatio + AvgPatients + Region*ResourceToPatient + PatientsWithoutInfectionResiduals, 
+                           data = HospitalDurations, 
+                           dist = "weibull")
+summary(aft_weibull)
+
+# Predicted survival times and Performance Metrics
+aft_pred <- predict(aft_weibull, type = "response")
+aft_rmse <- sqrt(mean((HospitalDurations$LengthOfStay - aft_pred)^2))
+cat("RMSE for Weibull AFT Model:", aft_rmse, "\n")
+cat("AIC for Weibull AFT Model:", AIC(aft_weibull), "\n")
+concordance(Surv(HospitalDurations$LengthOfStay) ~ aft_pred)
+```
+
+```{r}
+aft_coef <- tidy(aft_weibull)
+ggplot(aft_coef, aes(x = estimate, y = term)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = estimate - std.error, xmax = estimate + std.error)) +
+  theme_minimal() +
+  labs(title = "Forest Plot of Model Coefficients", x = "Coefficient Estimate", y = "Predictor")
+```
+
+```{r}
+# Fit the AFT model using the lognormal distribution
+aft_lognormal <- survreg(Surv(LengthOfStay) ~ Age + InfectionRisk + MedSchoolAff + XrayRatio + AvgPatients + Region*ResourceToPatient + PatientsWithoutInfectionResiduals, 
+                           data = HospitalDurations, 
+                           dist = "lognormal")
+summary(aft_lognormal)
+
+# Predicted survival times and Performance Metrics
+aft_pred <- predict(aft_lognormal, type = "response")
+aft_rmse <- sqrt(mean((HospitalDurations$LengthOfStay - aft_pred)^2))
+cat("RMSE for LogNormal AFT Model:", aft_rmse, "\n")
+cat("AIC for LogNormal AFT Model:", AIC(aft_lognormal), "\n")
+concordance(Surv(HospitalDurations$LengthOfStay) ~ aft_pred)
+```
+
+```{r}
+aft_coef <- tidy(aft_lognormal)
+ggplot(aft_coef, aes(x = estimate, y = term)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = estimate - std.error, xmax = estimate + std.error)) +
+  theme_minimal() +
+  labs(title = "Forest Plot of Model Coefficients", x = "Coefficient Estimate", y = "Predictor")
+```
+
+```{r}
+# Fit the AFT model using the log-logistic distribution
+aft_loglogistic <- survreg(Surv(LengthOfStay) ~ Age + InfectionRisk + MedSchoolAff + XrayRatio + AvgPatients + Region*ResourceToPatient + PatientsWithoutInfectionResiduals, 
+                           data = HospitalDurations, 
+                           dist = "loglogistic")
+summary(aft_loglogistic)
+
+# Predicted survival times and Performance Metrics
+aft_pred <- predict(aft_loglogistic, type = "response")
+aft_rmse <- sqrt(mean((HospitalDurations$LengthOfStay - aft_pred)^2))
+cat("RMSE for LogLogistic AFT Model:", aft_rmse, "\n")
+cat("AIC for LogLogistic AFT Model:", AIC(aft_loglogistic), "\n")
+concordance(Surv(HospitalDurations$LengthOfStay) ~ aft_pred)
+as.numeric(logLik(aft_loglogistic))
+```
+
+```{r}
+aft_coef <- tidy(aft_loglogistic)
+ggplot(aft_coef, aes(x = estimate, y = term)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = estimate - std.error, xmax = estimate + std.error)) +
+  theme_minimal() +
+  labs(title = "Forest Plot of Model Coefficients", x = "Coefficient Estimate", y = "Predictor")
+```
+
+```{r}
+# Extract residuals from the model
+weibull_residuals <- residuals(aft_weibull, type = "deviance")
+lognormal_residuals <- residuals(aft_lognormal, type = "deviance")
+loglogistic_residuals <- residuals(aft_loglogistic, type = "deviance")
+```
+
+# Q-Q Plot & Histogram of Residuals: Check for Normality
+```{r}
+par(mfrow = c(1, 2))
+hist(weibull_residuals, main = "Weibull Deviance Residuals", xlab = "Residuals", col = "lightblue", border = "black")
+qqnorm(weibull_residuals, main = "Q-Q Plot of Deviance Residuals")
+qqline(weibull_residuals, col = "red")
+
+par(mfrow = c(1, 2))
+hist(lognormal_residuals, main = "Lognormal Deviance Residuals", xlab = "Residuals", col = "lightblue", border = "black")
+qqnorm(lognormal_residuals, main = "Q-Q Plot of Deviance Residuals")
+qqline(lognormal_residuals, col = "red")
+
+par(mfrow = c(1, 2))
+hist(loglogistic_residuals, main = "Loglogistic Deviance Residuals", xlab = "Residuals", col = "lightblue", border = "black")
+qqnorm(loglogistic_residuals, main = "Q-Q Plot of Deviance Residuals")
+qqline(loglogistic_residuals, col = "red")
+```
+
+# Residuals vs Fitted Values Plot: Check for Heteroscedasticity
+```{r}
+fitted_values_weibull <- fitted(aft_weibull)
+fitted_values_lognormal <- fitted(aft_lognormal)
+fitted_values_loglogistic <- fitted(aft_loglogistic)
+
+ggplot(data = data.frame(Fitted = fitted_values_weibull, Residuals = weibull_residuals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "loess", color = "red", se = FALSE) +
+  ggtitle("Residuals vs Fitted Values Plot") +
+  xlab("Fitted Values") +
+  ylab("Residuals") +
+  theme_minimal()
+
+ggplot(data = data.frame(Fitted = fitted_values_lognormal, Residuals = lognormal_residuals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "loess", color = "red", se = FALSE) +
+  ggtitle("Residuals vs Fitted Values Plot") +
+  xlab("Fitted Values") +
+  ylab("Residuals") +
+  theme_minimal()
+
+ggplot(data = data.frame(Fitted = fitted_values_loglogistic, Residuals = loglogistic_residuals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "loess", color = "red", se = FALSE) +
+  ggtitle("Residuals vs Fitted Values Plot") +
+  xlab("Fitted Values") +
+  ylab("Residuals") +
+  theme_minimal()
+```
+
+# Autocorrelation Function Plot: Check for Independence of Residuals
+```{r}
+acf(weibull_residuals, main = "ACF Plot of Weibull AFT Model Residuals")
+acf(lognormal_residuals, main = "ACF Plot of Log-normal AFT Model Residuals")
+acf(loglogistic_residuals, main = "ACF Plot of Log-logistic AFT Model Residuals")
+```
+
+# Observed vs Predicted Plot: Check Model Fit
+```{r}
+observed_values <- HospitalDurations$LengthOfStay
+predicted_values <- predict(aft_weibull, type = "response")
+
+ggplot(data = data.frame(Observed = observed_values, Predicted = predicted_values), 
+       aes(x = Observed, y = Predicted)) +
+  geom_point(alpha = 0.7) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  ggtitle("Observed vs Predicted Values") +
+  xlab("Observed Length of Stay") +
+  ylab("Predicted Length of Stay") +
+  theme_minimal()
+
+observed_values <- HospitalDurations$LengthOfStay
+predicted_values <- predict(aft_lognormal, type = "response")
+
+ggplot(data = data.frame(Observed = observed_values, Predicted = predicted_values), 
+       aes(x = Observed, y = Predicted)) +
+  geom_point(alpha = 0.7) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  ggtitle("Observed vs Predicted Values") +
+  xlab("Observed Length of Stay") +
+  ylab("Predicted Length of Stay") +
+  theme_minimal()
+
+observed_values <- HospitalDurations$LengthOfStay
+predicted_values <- predict(aft_loglogistic, type = "response")
+
+ggplot(data = data.frame(Observed = observed_values, Predicted = predicted_values), 
+       aes(x = Observed, y = Predicted)) +
+  geom_point(alpha = 0.7) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  ggtitle("Observed vs Predicted Values") +
+  xlab("Observed Length of Stay") +
+  ylab("Predicted Length of Stay") +
+  theme_minimal()
+```
+
+```{r}
+# Drop a couple annoying outliers. Not good in real-world use-case.
+HospitalDurations <- HospitalDurations %>% filter(row_number() != 47)
+HospitalDurations <- HospitalDurations %>% filter(row_number() != 111)
+```
+
+```{r}
+concordance_index <- function(actual, predicted) {
+  concordance <- concordance(Surv(actual) ~ predicted)
+  return(concordance$concordance)
+}
+```
+
+```{r}
+# Function for Nested Cross-Validation with Bootstrapping to fit the AFT model and calculate performance metrics
+aft_model_metrics <- function(data, indices) {
+  
+  # Create bootstrapped training data set
+  train_data <- data[indices, ]
+  
+  # Inner loop to perform model selection and fit the AFT model
+  model_distributions <- c("weibull", "loglogistic", "lognormal")  # Distributions to evaluate
+  inner_results <- list()
+  
+  for (dist in model_distributions) {
+    tryCatch({
+      model <- survreg(Surv(LengthOfStay) ~ Age + InfectionRisk + MedSchoolAff + XrayRatio + 
+                         AvgPatients + Region * ResourceToPatient + PatientsWithoutInfectionResiduals, 
+                       data = train_data, 
+                       dist = dist)
+      
+      # Store results for each model
+      inner_results[[dist]] <- list(
+        model = model,
+        aic = AIC(model),
+        logLik = logLik(model)
+      )
+    }, error = function(e) {
+      # Handle cases where the model fails to fit
+      inner_results[[dist]] <- list(
+        model = NULL,
+        aic = Inf,   # Assign a very high AIC value for failed models
+        logLik = NA
+      )
+    })
+  }
+  
+  # Select best model based on AIC
+  best_model_name <- names(inner_results)[which.min(sapply(inner_results, function(x) x$aic))]
+  best_model <- inner_results[[best_model_name]]$model
+  
+  # Check if best_model is NULL
+  if (is.null(best_model)) {
+    return(c(Best_Dist = best_model_name, AIC = NA, LogLik = NA, RMSE = NA, Concordance = NA))
+  }
+  
+  # Use the best model to predict on remaining data
+  test_data <- data[-indices, ]
+  
+  # Ensure we have enough test data to evaluate
+  if (nrow(test_data) == 0) {
+    return(c(Best_Dist = best_model_name, AIC = NA, LogLik = NA, RMSE = NA, Concordance = NA))  
+  }
+  
+  # Predict survival times using the best model
+  predicted <- predict(best_model, newdata = test_data, type = "response")
+  
+  # Calculate RMSE
+  actual <- test_data$LengthOfStay
+  rmse <- sqrt(mean((actual - predicted)^2, na.rm = TRUE))
+  
+  # Calculate Concordance Index (C-index)
+  concordance <- concordance_index(actual, predicted) 
+  
+  # Return performance metrics as a vector
+  return(c(
+    Best_Dist = best_model_name,
+    AIC = AIC(best_model),
+    LogLik = as.numeric(logLik(best_model)),
+    RMSE = rmse,
+    Concordance = concordance
+  ))
+}
+```
+
+```{r}
+# Perform bootstrap with 500 resamples
+set.seed(123)
+bootstrap_results <- boot(data = HospitalDurations, statistic = aft_model_metrics, R = 500)
+```
+
+```{r}
+results_df <- as.data.frame(bootstrap_results$t)
+colnames(results_df) <- c("Best_Dist", "AIC", "LogLik", "RMSE", "Concordance")
+```
+
+```{r}
+# Summary stats
+results_df$AIC <- as.numeric(as.character(results_df$AIC))
+results_df$LogLik <- as.numeric(as.character(results_df$LogLik))
+results_df$RMSE <- as.numeric(as.character(results_df$RMSE))
+results_df$Concordance <- as.numeric(as.character(results_df$Concordance))
+
+summary_metrics <- data.frame(
+  Metric = c("AIC", "LogLik", "RMSE", "Concordance"),
+  Mean = colMeans(results_df[, 2:5], na.rm = TRUE),
+  SD = apply(results_df[, 2:5], 2, sd, na.rm = TRUE),
+  Median = apply(results_df[, 2:5], 2, median, na.rm = TRUE),
+  IQR = apply(results_df[, 2:5], 2, IQR, na.rm = TRUE)
+)
+
+print(summary_metrics)
+```
+
+```{r}
+results_df$ModelIndex <- 1:nrow(results_df)
+
+# Lowest AIC
+best_model_aic <- results_df[which.min(results_df$AIC), ]
+
+# Lowest RMSE
+best_model_rmse <- results_df[which.min(results_df$RMSE), ]
+
+# Highest concordance
+best_model_concordance <- results_df[which.max(results_df$Concordance), ]
+
+# Display the best models
+print(best_model_aic)
+print(best_model_rmse)
+print(best_model_concordance)
+```
